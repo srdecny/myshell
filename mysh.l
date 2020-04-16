@@ -11,9 +11,11 @@
 #.+\n { return EOL; }
 \n { return EOL; }
 ; { return SEMI; }
+\| { return PIPE; }
+\> { return GT; }
+\< { return LT; }
 [ \t] { /* ignore white space */ }
-[^|>< \t\n;]+ { yylval.str = strdup(yytext); return GROUP; }
-.	{ return yytext[0]; }
+[^|>< \t\n;]+ { yylval.str = strdup(yytext); return STRING; }
 
 %%
 

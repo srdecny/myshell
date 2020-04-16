@@ -1,8 +1,12 @@
 #pragma once
+#include <sys/types.h>
 
 void *safe_malloc(int size);
-char *concat_array(int count, char *words[]);
-void exit_shell();
-void handle_sigint_executing(int sig);
-void handle_sigint_reading(int sig);
+void safe_pipe(int *pipefd);
+void safe_dup2(int oldfd, int newfd);
+int safe_open(char *filename, int flags);
+void safe_close(int fd);
+pid_t safe_fork();
 
+void exit_shell();
+extern int shell_retval;
