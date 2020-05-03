@@ -2,13 +2,13 @@
 #include <stdlib.h>
 
 // Frees malloc'd data structures
-void free_line(struct line_s *line) {
+void free_line(line_t *line) {
     while (!STAILQ_EMPTY(line)) {
-        struct sequence *seq = STAILQ_FIRST(line);
+        sequence_t *seq = STAILQ_FIRST(line);
         while (!STAILQ_EMPTY(&seq->pipeline)) {
-            struct pipe_segment *seg = STAILQ_FIRST(&seq->pipeline);
+            pipe_segment_t *seg = STAILQ_FIRST(&seq->pipeline);
             while (!STAILQ_EMPTY(&seg->command)) {
-                struct param *par = STAILQ_FIRST(&seg->command);
+                param_t *par = STAILQ_FIRST(&seg->command);
                 free(par->string);
                 free(par->redirection);
                 STAILQ_REMOVE_HEAD(&seg->command, entries);

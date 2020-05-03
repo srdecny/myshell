@@ -1,4 +1,6 @@
-#pragma once
+#ifndef DATASTRUCTS_H
+#define DATASTRUCTS_H
+
 #include <sys/queue.h>
 
 /**
@@ -22,21 +24,22 @@ typedef struct redirection {
 typedef struct param {
     STAILQ_ENTRY(param) entries;
     char *string; 
-    struct redirection *redirection;
+    redirection_t *redirection;
 } param_t;
 typedef STAILQ_HEAD(command_s, param) command_t;
 
 typedef struct pipe_segment {
     STAILQ_ENTRY(pipe_segment) entries;
-    struct command_s command;
+    command_t command;
 } pipe_segment_t; 
 typedef STAILQ_HEAD(pipeline_s, pipe_segment) pipeline_t;
 
 typedef struct sequence {
   STAILQ_ENTRY(sequence) entries;
-  struct pipeline_s pipeline;
+  pipeline_t pipeline;
 } sequence_t;
 typedef STAILQ_HEAD(line_s, sequence) line_t;
 
+void free_line(line_t *line);
 
-void free_line(struct line_s *line);
+#endif

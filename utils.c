@@ -59,3 +59,10 @@ pid_t safe_fork() {
 void exit_shell() {
     exit(shell_retval);
 }
+
+void safe_setenv(char *name, char* value) {
+    if (setenv(name, value, 0) == -1) {
+        err(EXIT_FAILURE, "setenv failed");
+    }
+    return;
+}

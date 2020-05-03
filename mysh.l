@@ -1,10 +1,12 @@
 %{
-# include "mysh.tab.h"
+#include "datastructs.h"
+#include "mysh.tab.h"
 %}
 
 %option nounput
 %option noinput
 %option yylineno
+%option noyywrap
 
 %%
 

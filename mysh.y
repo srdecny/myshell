@@ -3,8 +3,9 @@
 %{
 #include <stdio.h>
 #include <string.h>
-#include "commands.c"
+#include "commands.h"
 #include "utils.h"
+#include "datastructs.h"
 
 // Declaration to suppress implicit declaration warnings
 extern int yylineno;
@@ -16,16 +17,13 @@ void end_lexical_scan();
 
 %}
 
-%code requires {
-  #include "datastructs.h"
-}
 
 %union {
   char *str;
-  struct command_s command;
-  struct pipeline_s pipeline;
-  struct line_s line;
-  struct redirection *redirection;
+  command_t command;
+  pipeline_t pipeline;
+  line_t line;
+  redirection_t *redirection;
 }
 
 %token EOL
@@ -52,7 +50,7 @@ program: line EOL {
 } 
 
 line: pipeline SEMI line {
-    struct sequence *s = safe_malloc(sizeof(struct sequence));
+    sequence_t *s = safe_malloc(sizeof(sequence_t));
     s->pipeline = $1;
     STAILQ_INSERT_HEAD(&$3, s, entries);
     $$ = $3;
@@ -60,14 +58,14 @@ line: pipeline SEMI line {
   | pipeline opt_semi {
     line_t line;
     STAILQ_INIT(&line);
-    struct sequence *s = safe_malloc(sizeof(struct sequence));
+    sequence_t *s = safe_malloc(sizeof(sequence_t));
     s->pipeline = $1;
     STAILQ_INSERT_HEAD(&line, s, entries);
     $$ = line;
     };
 
 pipeline: command PIPE pipeline {
-    struct pipe_segment *p = safe_malloc(sizeof(struct pipe_segment));
+    pipe_segment_t *p = safe_malloc(sizeof(pipe_segment_t));
     p->command = $1;
     STAILQ_INSERT_HEAD(&$3, p, entries);
     $$ = $3;
@@ -75,13 +73,13 @@ pipeline: command PIPE pipeline {
   | command {
     pipeline_t pipeline;
     STAILQ_INIT(&pipeline);
-    struct pipe_segment *p = safe_malloc(sizeof(struct pipe_segment));
+    pipe_segment_t *p = safe_malloc(sizeof(pipe_segment_t));
     p->command = $1;
     STAILQ_INSERT_HEAD(&pipeline, p, entries);
     $$ = pipeline;
   };
 command: STRING command {
-    struct param *p = safe_malloc(sizeof(struct param));
+    param_t *p = safe_malloc(sizeof(param_t));
     p->string = $1;
     p->redirection = NULL;
     STAILQ_INSERT_HEAD(&$2, p, entries);
@@ -90,14 +88,14 @@ command: STRING command {
   | STRING {
     command_t command;
     STAILQ_INIT(&command);
-    struct param *p = safe_malloc(sizeof(struct param));
+    param_t *p = safe_malloc(sizeof(param_t));
     p->string = $1;
     p->redirection = NULL;
     STAILQ_INSERT_HEAD(&command, p, entries);
     $$ = command;
   }
   | redirection command {
-    struct param *p = safe_malloc(sizeof(struct param));
+    param_t *p = safe_malloc(sizeof(param_t));
     p->string = NULL;
     p->redirection = $1;
     STAILQ_INSERT_HEAD(&$2, p, entries);
@@ -106,7 +104,7 @@ command: STRING command {
   | redirection {
     command_t command;
     STAILQ_INIT(&command);
-    struct param *p = safe_malloc(sizeof(struct param));
+    param_t *p = safe_malloc(sizeof(param_t));
     p->string = NULL;
     p->redirection = $1;
     STAILQ_INSERT_HEAD(&command, p, entries);
@@ -114,19 +112,19 @@ command: STRING command {
   };
 
   redirection: GT STRING {
-    struct redirection *r = safe_malloc(sizeof(struct redirection));
+    redirection_t *r = safe_malloc(sizeof(redirection_t));
     r->file = $2;
     r->type = OUTPUT;
     $$ = r;
   }
   | GT GT STRING {
-    struct redirection *r = safe_malloc(sizeof(struct redirection));
+    redirection_t *r = safe_malloc(sizeof(redirection_t));
     r->file = $3;
     r->type = OUTPUT_APPEND;
     $$ = r;
   }
   | LT STRING {
-    struct redirection *r = safe_malloc(sizeof(struct redirection));
+    redirection_t *r = safe_malloc(sizeof(redirection_t));
     r->file = $2;
     r->type = INPUT;
     $$ = r;

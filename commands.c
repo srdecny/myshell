@@ -4,20 +4,20 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include "datastructs.c"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 #include "utils.h"
 #include "commands.h"
 
 #define WRITE_END 1
 #define READ_END 0
 
-// See the "Alternate Architecture" section of the following link:
-// http://web.cse.ohio-state.edu/~mamrak.1/CIS762/pipes_lab_notes.html
-void process_line(struct line_s *line) {
-    struct sequence *seq = NULL;
+void process_line(line_t *line) {
+    sequence_t *seq = NULL;
     STAILQ_FOREACH(seq, line, entries) {
         int length = 0;
-        struct pipe_segment *seg = NULL;
+        pipe_segment_t *seg = NULL;
         // How many pipe segments there are in the pipeline
         STAILQ_FOREACH(seg, &seq->pipeline, entries) {
             length++;
@@ -26,65 +26,92 @@ void process_line(struct line_s *line) {
         // No pipelines, no forking (to make cd and exit work)
         if (length == 1) {
             seg = STAILQ_FIRST(&seq->pipeline);
-            process_command(&seg->command);
+            // Find first string (the command) in the segment
+            param_t *par = NULL;
+            char *str = NULL;
+            STAILQ_FOREACH(par, &seg->command, entries) {
+               if (par->string != NULL) {
+                   str = par->string;
+                   break;
+               } 
+            }
+            // Check if the command is a shell builtin
+            // If yes, then we don't fork to make cd and exit work properly
+            if ((str != NULL) && (
+                (strncmp(str, "cd", 2) == 0) ||
+                (strncmp(str, "exit", 4) == 0))) {
+                process_command(&seg->command);
+            } else {
+                int stat;
+                if (safe_fork() == 0) {
+                    process_command(&seg->command);
+                } else {
+                    wait(&stat);
+                    shell_retval = WEXITSTATUS(stat);
+                }
+            }
         } else { // Pipelines present
             int stat;
-            // Forking so the parent can wait for the pipeline to finish
-            if (safe_fork() == 0) { 
-                int index = 0; // Which segment is currently processed
-                int pipefd[2]; // Currently active pipeline
-                STAILQ_FOREACH(seg, &seq->pipeline, entries) {
-                    if (index == 0) { // First command in the pipeline
-                        safe_pipe(pipefd);
-                        if (safe_fork() == 0) {
-                            safe_dup2(pipefd[WRITE_END], STDOUT_FILENO);
-                            safe_close(pipefd[READ_END]);
-                            safe_close(pipefd[WRITE_END]);
-                            process_command(&seg->command);
-                            exit_shell();
-                        } 
-                    // Last command isn't forked so parent can wait on it
-                    } else if (index == length - 1) {
+            pid_t last_command_pid; // Last command in sequence
+            int index = 0; // Which segment is currently processed
+            int pipefd[2]; // Currently active pipeline
+            STAILQ_FOREACH(seg, &seq->pipeline, entries) {
+                if (index == 0) { // First command in the pipeline
+                    safe_pipe(pipefd);
+                    if (safe_fork() == 0) {
+                        safe_dup2(pipefd[WRITE_END], STDOUT_FILENO);
+                        safe_close(pipefd[READ_END]);
+                        safe_close(pipefd[WRITE_END]);
+                        process_command(&seg->command);
+                    } 
+                // Last command 
+                } else if (index == length - 1) {
+                    last_command_pid = safe_fork(); // the retval will be saved
+                    if (last_command_pid == 0) {
                         safe_dup2(pipefd[READ_END], STDIN_FILENO);
                         safe_close(pipefd[READ_END]);
                         safe_close(pipefd[WRITE_END]);
                         process_command(&seg->command);
-                        // Wait for all other processes to finish
-                        while (wait(&stat) > 0) { ; } 
-                        exit_shell();
-                    } else { // In the middle of the pipeline
-                        int new_pipefd[2]; // Create new pipe to be used later
-                        safe_pipe(new_pipefd);
-                        if (safe_fork() == 0) {
-                            safe_dup2(pipefd[READ_END], STDIN_FILENO);
-                            safe_dup2(new_pipefd[WRITE_END], STDOUT_FILENO);
-                            safe_close(pipefd[READ_END]);
-                            safe_close(pipefd[WRITE_END]);
-                            safe_close(new_pipefd[READ_END]);
-                            safe_close(new_pipefd[WRITE_END]);
-                            process_command(&seg->command);
-                            exit_shell();
-                        } else {
-                            safe_close(pipefd[WRITE_END]);
-                            safe_close(pipefd[READ_END]);
-                            pipefd[0] = new_pipefd[0];
-                            pipefd[1] = new_pipefd[1];
-                        }
+                    } else {
+                        safe_close(pipefd[READ_END]);
+                        safe_close(pipefd[WRITE_END]);
                     }
-                    index++;
+                } else { // In the middle of the pipeline
+                    int new_pipefd[2]; // Create new pipe to be used later
+                    safe_pipe(new_pipefd);
+                    if (safe_fork() == 0) {
+                        safe_dup2(pipefd[READ_END], STDIN_FILENO);
+                        safe_dup2(new_pipefd[WRITE_END], STDOUT_FILENO);
+                        safe_close(pipefd[READ_END]);
+                        safe_close(pipefd[WRITE_END]);
+                        safe_close(new_pipefd[READ_END]);
+                        safe_close(new_pipefd[WRITE_END]);
+                        process_command(&seg->command);
+                    } else {
+                        safe_close(pipefd[WRITE_END]);
+                        safe_close(pipefd[READ_END]);
+                        pipefd[0] = new_pipefd[0];
+                        pipefd[1] = new_pipefd[1];
+                    }
                 }
-
-            } else { // Wait for the sequence to finish.
-                wait(&stat);
+                index++;
+            }
+            // Wait for all children to finish and save the retval of last child
+            pid_t finished_child_pid;
+            while((finished_child_pid = wait(&stat)) > 0) {
+                if (finished_child_pid == last_command_pid) { 
+                    shell_retval = WEXITSTATUS(stat);
+                }
             }
         }
     }
 }
-void process_command(struct command_s *cmd) {
+
+void process_command(command_t *cmd) {
     // Count the arguments and create a null-terminated array
     // with pointers to the argumetns
     int argc = 0;
-    struct param *p = NULL;
+    param_t *p = NULL;
 
     // Redirections
     char *output_file = NULL;
@@ -131,43 +158,29 @@ void process_command(struct command_s *cmd) {
             internal_cd(argv[1]);
         }
     } else {
-        // Execute the command in a child process and wait for it to exit
-        int stat = 0;
-        pid_t pid = safe_fork();
-        if (pid == 0) {
-            // Create redirection files and redirect stdin/stdout to them
-            if (output_file != NULL) {
-                int fd = safe_open(output_file, O_TRUNC | O_WRONLY | O_CREAT);
-                safe_dup2(fd, STDOUT_FILENO);
-                safe_close(fd);
-            }
-
-            if (output_append_file != NULL) {
-                int fd = safe_open(output_append_file,
-                        O_APPEND | O_WRONLY | O_CREAT);
-                safe_dup2(fd, STDOUT_FILENO);
-                safe_close(fd);
-            }
-            if (input_file != NULL) {
-                int fd = safe_open(input_file, O_RDONLY);
-                safe_dup2(fd, STDIN_FILENO);
-                safe_close(fd);
-            }
-            int retval = execvp(argv[0], argv);
-            if (retval == -1) {
-                fprintf(stderr, "%s: %s\n", argv[0], strerror(errno));
-            }
-            shell_retval = 127; // Unknown command
-            exit_shell();
-        } else {
-            // Have to wait for the fork with exec, because process executing 
-            // this might have another children.
-            waitpid(pid, &stat, 0);
+        // Create redirection files and redirect stdin/stdout to them
+        if (output_file != NULL) {
+            int fd = safe_open(output_file, O_TRUNC | O_WRONLY | O_CREAT);
+            safe_dup2(fd, STDOUT_FILENO);
+            safe_close(fd);
         }
 
-        if (WIFEXITED(stat)) {
-            shell_retval = WEXITSTATUS(stat);
+        if (output_append_file != NULL) {
+            int fd = safe_open(output_append_file,
+                    O_APPEND | O_WRONLY | O_CREAT);
+            safe_dup2(fd, STDOUT_FILENO);
+            safe_close(fd);
         }
+        if (input_file != NULL) {
+            int fd = safe_open(input_file, O_RDONLY);
+            safe_dup2(fd, STDIN_FILENO);
+            safe_close(fd);
+        }
+        int retval = execvp(argv[0], argv);
+        if (retval == -1) {
+            fprintf(stderr, "%s: %s\n", argv[0], strerror(errno));
+        }
+        exit(127); // Unknown command
     }
 }   
 
@@ -178,13 +191,18 @@ void internal_cd(char *location) {
     int chdir_ret = 1;
     if (location == NULL) {
         char *home_dir = getenv("HOME");
-        // $HOME is set by the system upon logging in and thus is never null
-        chdir_ret = chdir(home_dir); 
-        new_pwd = home_dir;
+        if (home_dir == NULL) {
+            fprintf(stderr, "cd: HOME not set\n");
+            shell_retval = 1;
+        } else {
+            chdir_ret = chdir(home_dir); 
+            new_pwd = home_dir;
+        }
     } else if (strcmp(location, "-") == 0) {
         char *old_pwd = getenv("OLDPWD");
         if (old_pwd == NULL) {
             fprintf(stderr, "cd: OLDPWD not set\n");
+            shell_retval = 1;
         } else {
             printf("%s\n", old_pwd);
             chdir_ret = chdir(old_pwd);
@@ -200,10 +218,10 @@ void internal_cd(char *location) {
         if (prev_pwd != NULL) {
           setenv("OLDPWD", prev_pwd, 1);
         }
+        shell_retval = 0;
     } else if (chdir_ret == -1) {
         fprintf(stderr, "cd: %s\n", strerror(errno));
         shell_retval = errno;
     }
-
 }
 
